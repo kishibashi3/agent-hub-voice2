@@ -91,7 +91,10 @@ class CommandListener:
                                 logger.warning("ack failed for %s: %s", msg.id, ack_err)
             except Exception as e:
                 logger.error(
-                    "CommandListener error: %s — retry in %ds", e, backoff
+                    "CommandListener error (retry in %ds): %s",
+                    backoff,
+                    e,
+                    exc_info=True,
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)

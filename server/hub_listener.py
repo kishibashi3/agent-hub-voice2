@@ -72,7 +72,10 @@ class HubListener:
                 raise
             except Exception as e:
                 logger.warning(
-                    "HubListener: disconnected (%s) — retry in %.1fs", e, backoff
+                    "HubListener: disconnected (retry in %.1fs): %s",
+                    backoff,
+                    e,
+                    exc_info=True,
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _HUB_RECONNECT_BACKOFF_MAX_S)
