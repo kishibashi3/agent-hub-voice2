@@ -229,7 +229,20 @@ connectBtn.addEventListener('click', async () => {
   if (code.length !== 6) return;
   _submitting = true;
   connectBtn.disabled = true;
-  await startSession(code);
+  // ハッピーパス: startSession 成功時は _submitting = true のまま voice パネルへ移行し、
+  // RoomEvent.Disconnected でリセットする設計。
+  // 失敗・例外パスは startSession 内部または下記 catch でリセットする。
+  try {
+    await startSession(code);
+  } catch (err) {
+    // startSession 内部の catch を漏れた予期せぬ例外のフォールバック。
+    // _submitting が true のまま stuck するのを防ぎ、ページリロードなしに再試行できる。
+    console.error('[voice] startSession unexpected error:', err);
+    _submitting = false;
+    connectBtn.disabled = false;
+    setStatus('');
+    showErrorBanner('予期せぬエラー', String(err));
+  }
 });
 
 disconnectBtn.addEventListener('click', () => {
