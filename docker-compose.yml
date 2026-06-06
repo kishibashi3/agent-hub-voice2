@@ -16,11 +16,9 @@ services:
     networks:
       - voice-net
 
-  # Pipecat voice server
+  # Pipecat voice server (CI でビルド済み ghcr.io イメージを使用)
   pipecat:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/kishibashi3/agent-hub-voice2:latest
     platform: linux/arm64
     restart: unless-stopped
     ports:
