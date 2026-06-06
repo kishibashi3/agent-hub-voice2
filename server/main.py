@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 # 設定
 # ---------------------------------------------------------------------------
 LIVEKIT_URL = os.environ["LIVEKIT_URL"]
+LIVEKIT_PUBLIC_URL = os.environ["LIVEKIT_PUBLIC_URL"]
 LIVEKIT_API_KEY = os.environ["LIVEKIT_API_KEY"]
 LIVEKIT_API_SECRET = os.environ["LIVEKIT_API_SECRET"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
@@ -307,7 +308,7 @@ async def handle_auth(request: web.Request) -> web.Response:
     return web.Response(
         status=200,
         content_type="application/json",
-        text=json.dumps({"token": user_token, "url": LIVEKIT_URL}),
+        text=json.dumps({"token": user_token, "url": LIVEKIT_PUBLIC_URL}),
     )
 
 
