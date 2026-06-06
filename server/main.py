@@ -121,7 +121,24 @@ async def _run_hub_with_reconnect() -> None:
     async def _handle_generate_code(
         msg: IncomingMessage, hub: HubSession, args: str
     ) -> None:
-        """OTP を生成して送信者に返信する。router が自動で ack する。"""
+        """アクティブセッションを終了してから OTP を生成して送信者に返信する。router が自動で ack する。
+
+        既存セッションを先に terminate することで、OTP を受け取ったユーザーが
+        POST /auth したとき session_in_use (409) にならないようにする。
+        _active_hub_listener を terminate() より先に None にセットし、
+        停止中の古いパイプラインに hub メッセージが誤送信されるのを防ぐ。
+        """
+        global _active_hub_listener
+
+        # アクティブセッションがあれば先に停止する
+        if session_manager.is_active:
+            logger.info(
+                "/generate-code: active session found — terminating before OTP generation"
+            )
+            # メッセージ誤送信防止: terminate() より先に HubListener をクリア
+            _active_hub_listener = None
+            await session_manager.terminate()
+
         code, ttl = otp_store.generate()
         ttl_min = ttl // 60
         reply = (
