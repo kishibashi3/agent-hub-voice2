@@ -31,11 +31,11 @@ services:
       - SYSTEM_PROMPT=${SYSTEM_PROMPT:-}
       - PORT=8765
       # OTP 永続化パス (named volume マウント先と合わせる)
-      - OTP_PERSIST_PATH=/opt/otp/otp_store.json
+      - OTP_STORE_PATH=/otp/otp.json
     volumes:
       # OTP 永続化用 named volume。
       # docker compose up -d でコンテナが再作成されても OTP が復元される。
-      - otp-data:/opt/otp
+      - otp-data:/otp
     depends_on:
       - livekit
 
