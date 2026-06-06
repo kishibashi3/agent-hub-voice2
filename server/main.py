@@ -20,6 +20,18 @@ voice-gateway v2 — メインサーバー
   AGENT_HUB_TENANT     tenant (optional)
   SYSTEM_PROMPT        Gemini system instruction (optional)
   PORT                 HTTP listen port (default: 8765)
+
+## hub 接続設計
+
+AgentHub.connect() は main() で 1 回だけ呼ぶ。単一の MCP セッションを
+_run_hub_with_reconnect() が管理し、hub.inbox() も 1 本だけ開く。
+
+メッセージは以下のルールで dispatch する:
+  - /generate-code → CommandListener.handle() (OTP 発行)
+  - それ以外 → HubListener.handle_message() → パイプラインに TextFrame inject
+
+これにより同一 @voice ハンドルで 2 本の MCP セッションが並走する問題と、
+inbox の race condition (メッセージ消失) を解消する。
 """
 import asyncio
 import json
@@ -30,10 +42,12 @@ from pathlib import Path
 
 from aiohttp import web
 
+from agent_hub_sdk import AgentHub
+
 from auth import OTPStore
-from command_listener import CommandListener
+from command_listener import CommandListener, CMD_GENERATE_CODE, DISPLAY_NAME
 from hub_listener import HubListener
-from hub_tools import HUB_TOOL_DEFINITIONS, HUB_TOOL_HANDLERS
+from hub_tools import HUB_TOOL_DEFINITIONS, HUB_TOOL_HANDLERS, set_hub_session, clear_hub_session
 from pipeline import create_pipeline_and_run
 from session_manager import SessionManager
 
@@ -69,6 +83,75 @@ SYSTEM_PROMPT = os.environ.get("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 # ---------------------------------------------------------------------------
 otp_store = OTPStore()
 session_manager = SessionManager()
+
+# 共有 AgentHub セッション (_run_hub_with_reconnect が管理)
+_active_hub = None
+
+# アクティブな HubListener (パイプラインセッション中のみ非 None)
+# asyncio は single-thread のため、単純な代入でスレッドセーフ。
+_active_hub_listener: HubListener | None = None
+
+# ---------------------------------------------------------------------------
+# Hub 管理
+# ---------------------------------------------------------------------------
+
+async def _run_hub_with_reconnect(cmd_listener: CommandListener) -> None:
+    """単一の AgentHub セッションを管理する。切断時は自動再接続。
+
+    hub.inbox() を 1 本だけ開き、メッセージを以下のルールで dispatch する:
+      - /generate-code → CommandListener.handle() (OTP 発行)
+      - それ以外、パイプラインあり → HubListener.handle_message() → TextFrame inject
+      - それ以外、パイプラインなし → ack して無視
+
+    これにより同一 @voice ハンドルで 2 本の MCP セッションが並走する問題と、
+    inbox の race condition を解消する。
+    """
+    global _active_hub
+    backoff = 5.0
+    while True:
+        try:
+            async with AgentHub.connect(
+                user=HUB_USER,
+                url=HUB_URL,
+                pat=HUB_PAT,
+                tenant=HUB_TENANT,
+                display_name=DISPLAY_NAME,
+            ) as hub:
+                _active_hub = hub
+                set_hub_session(hub)
+                backoff = 5.0  # 正常接続できたらリセット
+                logger.info("Hub: @%s に接続しました", HUB_USER)
+
+                async with hub.inbox() as messages:
+                    async for msg in messages:
+                        body = (msg.body or "").strip()
+                        if body.lower() == CMD_GENERATE_CODE:
+                            # /generate-code: セッション有無に関わらず CommandListener が処理
+                            await cmd_listener.handle(hub, msg)
+                        else:
+                            listener = _active_hub_listener
+                            if listener is not None:
+                                # パイプラインがアクティブ: pipeline に inject
+                                await listener.handle_message(hub, msg)
+                            else:
+                                # パイプラインなし: ack して無視
+                                try:
+                                    await hub.ack(msg.id)
+                                except Exception:
+                                    pass
+
+        except asyncio.CancelledError:
+            logger.info("Hub: シャットダウン")
+            _active_hub = None
+            clear_hub_session()
+            raise
+        except Exception as e:
+            logger.error("Hub: 切断 (%s) — %.1fs 後に再接続", e, backoff)
+            _active_hub = None
+            clear_hub_session()
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
+
 
 # ---------------------------------------------------------------------------
 # LiveKit token 生成
@@ -107,6 +190,8 @@ async def handle_auth(request: web.Request) -> web.Response:
     Response (401): {"error": "invalid_otp"}
     Response (409): {"error": "session_in_use"}
     """
+    global _active_hub_listener
+
     try:
         body = await request.json()
     except Exception:
@@ -146,13 +231,13 @@ async def handle_auth(request: web.Request) -> web.Response:
             text=json.dumps({"error": "token_generation_failed"}),
         )
 
-    # Pipecat パイプラインを非同期で起動
-    hub_listener = HubListener(
-        hub_url=HUB_URL,
-        hub_user=HUB_USER,
-        hub_pat=HUB_PAT,
-        hub_tenant=HUB_TENANT,
-    )
+    # HubListener (hub 接続を持たない — main の hub セッションを使う)
+    hub_listener = HubListener()
+
+    def _on_session_done():
+        global _active_hub_listener
+        _active_hub_listener = None
+        session_manager.on_session_ended()
 
     runner_task = asyncio.create_task(
         create_pipeline_and_run(
@@ -165,7 +250,7 @@ async def handle_auth(request: web.Request) -> web.Response:
             tool_definitions=HUB_TOOL_DEFINITIONS,
             tool_handlers=HUB_TOOL_HANDLERS,
             hub_listener=hub_listener,
-            on_session_ended=session_manager.on_session_ended,
+            on_session_ended=_on_session_done,
         ),
         name=f"pipeline-{room_name}",
     )
@@ -175,6 +260,9 @@ async def handle_auth(request: web.Request) -> web.Response:
         pipeline_task=None,   # PipelineTask の参照は pipeline.py 内で管理
         runner_task=runner_task,
     )
+
+    # アクティブ HubListener を登録 (hub inbox から dispatch される)
+    _active_hub_listener = hub_listener
 
     logger.info("Session started: room=%s", room_name)
     return web.Response(
@@ -189,16 +277,15 @@ async def handle_auth(request: web.Request) -> web.Response:
 # ---------------------------------------------------------------------------
 
 async def main() -> None:
-    # CommandListener (agent-hub /generate-code)
-    cmd_listener = CommandListener(
-        hub_url=HUB_URL,
-        hub_user=HUB_USER,
-        hub_pat=HUB_PAT,
-        hub_tenant=HUB_TENANT,
-        otp_store=otp_store,
+    # CommandListener (OTP 発行ハンドラ) を生成
+    # hub 接続は _run_hub_with_reconnect が管理するため、ここでは接続しない
+    cmd_listener = CommandListener(otp_store=otp_store)
+
+    # 単一 Hub セッション管理タスク (inbox dispatch も担当)
+    hub_task = asyncio.create_task(
+        _run_hub_with_reconnect(cmd_listener), name="hub_manager"
     )
-    asyncio.create_task(cmd_listener.run(), name="command_listener")
-    logger.info("CommandListener started")
+    logger.info("Hub manager started")
 
     # HTTP サーバー
     app = web.Application()
@@ -212,7 +299,15 @@ async def main() -> None:
     logger.info("voice-gateway v2 started on port %d", PORT)
 
     # 永久待機
-    await asyncio.Event().wait()
+    try:
+        await asyncio.Event().wait()
+    finally:
+        hub_task.cancel()
+        try:
+            await hub_task
+        except asyncio.CancelledError:
+            pass
+        await runner.cleanup()
 
 
 if __name__ == "__main__":

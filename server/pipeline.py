@@ -139,7 +139,6 @@ async def create_pipeline_and_run(
         logger.info("Injected %d hub messages to pipeline", len(messages))
 
     hub_listener.set_callback(on_hub_messages)
-    hub_task = asyncio.create_task(hub_listener.run(), name="hub_listener")
 
     # ------------------------------------------------------------------
     # Runner
@@ -154,10 +153,6 @@ async def create_pipeline_and_run(
     except Exception as e:
         logger.error("Pipeline error: room=%s error=%s", room_name, e)
     finally:
-        hub_task.cancel()
-        try:
-            await hub_task
-        except asyncio.CancelledError:
-            pass
+        hub_listener.clear_callback()
         on_session_ended()
         logger.info("Pipeline ended: room=%s", room_name)

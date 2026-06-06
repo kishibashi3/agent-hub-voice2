@@ -1,23 +1,22 @@
 """
-agent-hub の inbox を listen し、slash command を直接処理する。
+agent-hub の inbox メッセージをハンドリングする。
 
-agent-hub-sdk の AgentHub.connect() + hub.inbox() を使用。
-LLM (Gemini) を経由せず、CommandListener が即座に応答する。
+CommandListener は hub 接続を持たない。
+main.py が単一の AgentHub セッションを管理し、
+inbox から受信したメッセージを CommandListener.handle() 経由で渡す。
 
 対応 slash command:
   /generate-code  → 6 桁 OTP を生成し、送信者に返信
 
-未知のコマンド / bare text を受信した場合はエラーレスポンスを返す。
+このリスナーは VoiceSession (パイプライン) がアクティブでない場合に
+/generate-code を処理する。パイプラインがアクティブな場合は
+パイプライン側が _generate-code も含めて処理する。
 
-このリスナーは gateway 起動時に 1 つだけ起動され、
-パイプライン (Pipecat) とは独立して動作する。
-
-v1 から移植。#11 (未知コマンドエラーレスポンス) を統合済み。
+v1 の設計に倣い、hub 接続は main.py が 1 本管理する。
 """
-import asyncio
 import logging
 
-from agent_hub_sdk import AgentHub
+from agent_hub_sdk import HubSession, IncomingMessage
 
 from auth import OTPStore
 
@@ -28,16 +27,13 @@ DISPLAY_NAME = "voice-gateway — Gemini Live voice interface (slash: /generate-
 # v2.0 以降: slash command は / prefix 必須
 CMD_GENERATE_CODE = "/generate-code"
 
-UNKNOWN_CMD_REPLY = (
-    "コマンドが認識できません。\n"
-    "使用可能なコマンド: /generate-code"
-)
-
 
 class CommandListener:
     """
-    voice-gateway の agent-hub handle (@voice 等) の inbox を SDK で listen し、
-    slash command を直接処理するサービス。
+    voice-gateway の agent-hub inbox メッセージをハンドリングするサービス。
+
+    hub 接続は持たない。main.py が単一の AgentHub セッションを管理し、
+    inbox メッセージを handle() 経由でここに渡す設計。
 
     /generate-code を受信すると:
       1. OTPStore で 6 桁コードを生成 (TTL 5 分)
@@ -47,73 +43,33 @@ class CommandListener:
     LLM を経由しないため、遅延なく即座に応答できる。
     """
 
-    def __init__(
-        self,
-        hub_url: str,
-        hub_user: str,
-        hub_pat: str,
-        hub_tenant: str | None,
-        otp_store: OTPStore,
-    ) -> None:
-        self._hub_url = hub_url
-        self._hub_user = hub_user
-        self._hub_pat = hub_pat
-        self._hub_tenant = hub_tenant
+    def __init__(self, otp_store: OTPStore) -> None:
         self.otp_store = otp_store
 
-    async def run(self) -> None:
-        """接続・登録後、inbox listen ループを開始する（リトライ付き）。"""
-        backoff = 5
-        while True:
-            try:
-                async with AgentHub.connect(
-                    user=self._hub_user,
-                    url=self._hub_url,
-                    pat=self._hub_pat,
-                    tenant=self._hub_tenant,
-                    display_name=DISPLAY_NAME,
-                ) as hub:
-                    logger.info(
-                        "CommandListener: connected as @%s, listening for slash commands",
-                        self._hub_user,
-                    )
-                    backoff = 5  # 正常接続できたらリセット
-                    async with hub.inbox() as messages:
-                        async for msg in messages:
-                            body = (msg.body or "").strip()
-                            if body.lower() == CMD_GENERATE_CODE:
-                                await self._handle_generate_code(hub, msg.sender, msg.id)
-                            else:
-                                await self._handle_unknown(hub, msg.sender, body)
-                            try:
-                                await hub.ack(msg.id)
-                            except Exception as ack_err:
-                                logger.warning("ack failed for %s: %s", msg.id, ack_err)
-            except Exception as e:
-                logger.error(
-                    "CommandListener error (retry in %ds): %s",
-                    backoff,
-                    e,
-                    exc_info=True,
-                )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60)
-
-    async def _handle_unknown(self, hub, sender: str, body: str) -> None:
+    async def handle(self, hub: HubSession, msg: IncomingMessage) -> None:
         """
-        未知のコマンド / bare text へのエラーレスポンス。
+        inbox から受け取った 1 件のメッセージを処理する。
 
-        ユーザーが認識できないコマンドを送った場合に利用可能なコマンドを案内する。
+        パイプラインがアクティブでない場合のみ呼ばれる。
+        パイプラインがアクティブな場合は HubListener.handle_message() が処理する。
         """
+        body = (msg.body or "").strip()
+        if body.lower() == CMD_GENERATE_CODE:
+            await self._handle_generate_code(hub, msg.sender, msg.id)
+        # 未知の slash command / bare text はそのまま ack して無視
+        # (パイプラインがアクティブな場合は Gemini セッション側で処理)
         try:
-            await hub.send(sender, UNKNOWN_CMD_REPLY)
-            logger.info("unknown command from %s: %r — replied with guidance", sender, body)
-        except Exception as e:
-            logger.error("unknown command: failed to reply to %s: %s", sender, e)
+            await hub.ack(msg.id)
+        except Exception as ack_err:
+            logger.warning("ack failed for %s: %s", msg.id, ack_err)
 
-    async def _handle_generate_code(self, hub, sender: str, msg_id: str) -> None:
+    async def _handle_generate_code(
+        self, hub: HubSession, sender: str, msg_id: str
+    ) -> None:
         """
         /generate-code 処理: OTP 生成 → 送信者に返信。
+
+        LLM を経由せず CommandListener が直接 send を呼ぶ。
         """
         code, ttl = self.otp_store.generate()
         ttl_min = ttl // 60
