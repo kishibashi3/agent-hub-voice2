@@ -7,9 +7,8 @@ port: 7880
 rtc:
   udp_port: 7881
   tcp_port: 7882
-  # Pi5 はローカルネットワーク内なので external IP 不要
-  # 外部からアクセスする場合は use_external_ip: true に変更
   use_external_ip: false
+  node_ip: 192.168.3.45
 
 # API キーペア (環境変数で上書き可能)
 # docker-compose.yml の LIVEKIT_API_KEY / LIVEKIT_API_SECRET と合わせる
