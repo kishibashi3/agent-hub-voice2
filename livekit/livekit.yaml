@@ -20,7 +20,3 @@ keys:
 logging:
   level: info
   pion_level: error
-
-# 開発用: 同一ホストからのアクセスを許可
-# 本番では適切な CORS/CSP を設定すること
-development_mode: true

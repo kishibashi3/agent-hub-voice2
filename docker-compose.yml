@@ -24,7 +24,7 @@ services:
     platform: linux/arm64
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      - "8766:8765"
     environment:
       - LIVEKIT_URL=ws://livekit:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
