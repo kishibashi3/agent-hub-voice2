@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm   # ネイティブ ARM64 ランナー (QEMU 不要、パブリック repo 無料)
     permissions:
       contents: read
       packages: write   # ghcr.io への push に必要
@@ -15,11 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # linux/arm64 ビルドに必要な QEMU エミュレーション
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      # BuildKit ベースの buildx を有効化
+      # BuildKit ベースの buildx を有効化 (キャッシュ利用のため)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -31,7 +27,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # linux/arm64 イメージをビルドして push
+      # ARM64 ネイティブでビルドして push
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
