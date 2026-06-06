@@ -3,9 +3,11 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # システム依存 (Pipecat Silero VAD が onnxruntime を使用)
+# git は agent-hub-sdk を GitHub URL から pip install するために必要
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # 依存パッケージ
