@@ -204,16 +204,30 @@ let room = null;
 
 // ---- Auth panel ----
 
+// 二重 POST 防止フラグ。
+// connectBtn.disabled だけでは、DOM 更新前にキューに積まれた click イベントを
+// 防げないケースがある (iOS autocomplete auto-submit + 手動タップの同時発生、
+// keydown→connectBtn.click() とブラウザ native submit の競合など)。
+// アプリ側の state フラグで二重送信を確実に防ぐ。
+let _submitting = false;
+
 otpInput.addEventListener('input', () => {
   connectBtn.disabled = otpInput.value.replace(/\D/g, '').length !== 6;
 });
 otpInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !connectBtn.disabled) connectBtn.click();
+  if (e.key === 'Enter' && !connectBtn.disabled) {
+    e.preventDefault(); // ブラウザ default (implicit form submit 等) を抑止
+    connectBtn.click();
+  }
 });
 
 connectBtn.addEventListener('click', async () => {
+  // _submitting フラグ: 二重 POST を防ぐ最終ガード
+  // (DOM disabled だけでは既にキューに積まれたイベントを防げないため)
+  if (_submitting) return;
   const code = otpInput.value.replace(/\D/g, '');
   if (code.length !== 6) return;
+  _submitting = true;
   connectBtn.disabled = true;
   await startSession(code);
 });
@@ -242,6 +256,7 @@ async function startSession(code) {
       } else {
         showErrorBanner('エラー', data.error || '不明なエラー');
       }
+      _submitting = false; // エラー時: フラグをリセットして再試行を許可
       connectBtn.disabled = false;
       setStatus('');
       return;
@@ -250,6 +265,7 @@ async function startSession(code) {
     url = data.url;
   } catch (e) {
     showErrorBanner('接続失敗', e.message);
+    _submitting = false; // 例外時: フラグをリセットして再試行を許可
     connectBtn.disabled = false;
     setStatus('');
     return;
@@ -278,6 +294,7 @@ async function startSession(code) {
     authPanel.style.display = 'block';
     voicePanel.style.display = 'none';
     micBtn.classList.remove('speaking');
+    _submitting = false; // セッション終了: フラグをリセットして次の接続を許可
     connectBtn.disabled = false;
     otpInput.value = '';
     room = null;
@@ -315,6 +332,7 @@ async function startSession(code) {
     await room.connect(url, token);
   } catch (e) {
     showErrorBanner('LiveKit 接続失敗', e.message);
+    _submitting = false; // LiveKit 接続失敗時: フラグをリセットして再試行を許可
     connectBtn.disabled = false;
     setStatus('');
     room = null;
