@@ -27,13 +27,11 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.frames.frames import TextFrame, EndFrame
 
-try:
-    from pipecat.services.google import GeminiLiveLLMService
-    _GEMINI_CLASS = GeminiLiveLLMService
-except ImportError:
-    # 旧バージョン / 別パス
-    from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService  # type: ignore
-    _GEMINI_CLASS = GeminiMultimodalLiveLLMService
+# pipecat v1.3.0: pipecat.services.google.gemini_live.llm に移動
+# - pipecat.services.google.GeminiLiveLLMService は存在しない (google/__init__.py は空)
+# - pipecat.services.gemini_multimodal_live は廃止済み
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+_GEMINI_CLASS = GeminiLiveLLMService
 
 from pipecat.transports.services.livekit import LiveKitTransport, LiveKitParams
 from pipecat.audio.vad.silero import SileroVADAnalyzer
