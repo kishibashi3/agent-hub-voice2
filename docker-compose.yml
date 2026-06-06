@@ -21,6 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    platform: linux/arm64
     restart: unless-stopped
     ports:
       - "8765:8765"

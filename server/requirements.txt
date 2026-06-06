@@ -1,5 +1,9 @@
 # voice-gateway v2 依存パッケージ
 
+# onnxruntime: Silero VAD の実行時依存 (pipecat の silero エクストラは空のため明示)
+# ARM64 wheel 確認済み: manylinux_2_27_aarch64 (Python 3.12, onnxruntime>=1.19.0)
+onnxruntime>=1.19.0,<2.0
+
 # Pipecat + LiveKit transport + Gemini Live + Silero VAD
 pipecat-ai[livekit,google,silero]>=1.3.0
 
