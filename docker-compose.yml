@@ -17,6 +17,9 @@ services:
     platform: linux/arm64
     restart: unless-stopped
     network_mode: host
+    volumes:
+      # OTP 永続化: コンテナ再起動後も発行済み OTP を保持する (issue #10)
+      - otp-data:/otp
     environment:
       - LIVEKIT_URL=ws://localhost:7880
       - LIVEKIT_PUBLIC_URL=${LIVEKIT_PUBLIC_URL}
@@ -30,8 +33,13 @@ services:
       - AGENT_HUB_TENANT=${AGENT_HUB_TENANT:-}
       - SYSTEM_PROMPT=${SYSTEM_PROMPT:-}
       - PORT=8765
+      - OTP_STORE_PATH=/otp/otp.json
     depends_on:
       - livekit
+
+volumes:
+  # OTP 永続化ボリューム: コンテナ再起動を跨いで OTP を保持する
+  otp-data:
 
 networks:
   voice-net:
