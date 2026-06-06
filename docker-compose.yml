@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  # LiveKit SFU サーバー (WebRTC)
+  livekit:
+    image: livekit/livekit-server:latest
+    platform: linux/arm64
+    restart: unless-stopped
+    ports:
+      - "7880:7880"       # HTTP / WebSocket
+      - "7881:7881/udp"   # WebRTC UDP (RTP/RTCP)
+      - "7882:7882/tcp"   # WebRTC TCP フォールバック
+    volumes:
+      - ./livekit/livekit.yaml:/livekit.yaml:ro
+    command: --config /livekit.yaml
+    networks:
+      - voice-net
+
+  # Pipecat voice server
+  pipecat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash-live-001}
+      - AGENT_HUB_URL=${AGENT_HUB_URL}
+      - AGENT_HUB_USER=${AGENT_HUB_USER:-voice}
+      - AGENT_HUB_PAT=${AGENT_HUB_PAT}
+      - AGENT_HUB_TENANT=${AGENT_HUB_TENANT:-}
+      - SYSTEM_PROMPT=${SYSTEM_PROMPT:-}
+      - PORT=8765
+    depends_on:
+      - livekit
+    networks:
+      - voice-net
+
+networks:
+  voice-net:
+    driver: bridge

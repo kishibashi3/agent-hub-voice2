@@ -1,0 +1,26 @@
+# LiveKit Server 設定 (self-hosted / Pi5)
+# 参考: https://docs.livekit.io/home/self-hosting/local/
+
+port: 7880
+
+# RTC ポート (WebRTC UDP/TCP)
+rtc:
+  udp_port: 7881
+  tcp_port: 7882
+  # Pi5 はローカルネットワーク内なので external IP 不要
+  # 外部からアクセスする場合は use_external_ip: true に変更
+  use_external_ip: false
+
+# API キーペア (環境変数で上書き可能)
+# docker-compose.yml の LIVEKIT_API_KEY / LIVEKIT_API_SECRET と合わせる
+keys:
+  devkey: devsecret
+
+# ロギング
+logging:
+  level: info
+  pion_level: error
+
+# 開発用: 同一ホストからのアクセスを許可
+# 本番では適切な CORS/CSP を設定すること
+development_mode: true

@@ -1,0 +1,16 @@
+# voice-gateway v2 依存パッケージ
+
+# Pipecat + LiveKit transport + Gemini Live + Silero VAD
+pipecat-ai[livekit,google,silero]>=1.3.0
+
+# LiveKit API (token 生成)
+livekit-api>=0.7.0
+
+# agent-hub SDK
+agent-hub-sdk>=0.7.0
+
+# HTTP サーバー
+aiohttp>=3.9.0
+
+# Google Generative AI (Gemini tools schema)
+google-generativeai>=0.8.0
