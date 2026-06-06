@@ -33,7 +33,9 @@ from pipecat.frames.frames import TextFrame, EndFrame
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 _GEMINI_CLASS = GeminiLiveLLMService
 
-from pipecat.transports.services.livekit import LiveKitTransport, LiveKitParams
+# pipecat v1.3.0: pipecat.transports.livekit.transport に移動
+# - pipecat.transports.services.livekit は存在しない (services/ ディレクトリなし)
+from pipecat.transports.livekit.transport import LiveKitTransport, LiveKitParams
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 
