@@ -16,7 +16,7 @@ voice-gateway v2 — メインサーバー
   GEMINI_MODEL         Gemini model name (default: gemini-2.0-flash-live-001)
   AGENT_HUB_URL        agent-hub server URL
   AGENT_HUB_USER       @handle (e.g. voice)
-  AGENT_HUB_PAT        Personal Access Token
+  AGENT_HUB_GITHUB_PAT Personal Access Token
   AGENT_HUB_TENANT     tenant (optional)
   SYSTEM_PROMPT        Gemini system instruction (optional)
   PORT                 HTTP listen port (default: 8765)
@@ -53,7 +53,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-live-001")
 HUB_URL = os.environ["AGENT_HUB_URL"]
 HUB_USER = os.environ["AGENT_HUB_USER"]
-HUB_PAT = os.environ["AGENT_HUB_PAT"]
+HUB_PAT = os.environ["AGENT_HUB_GITHUB_PAT"]
 HUB_TENANT = os.environ.get("AGENT_HUB_TENANT")
 PORT = int(os.environ.get("PORT", 8765))
 
