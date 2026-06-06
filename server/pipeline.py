@@ -4,10 +4,15 @@ Pipecat パイプライン factory。
 LiveKitTransport + SileroVADAnalyzer + GeminiLiveLLMService を
 Pipecat Pipeline DSL で組み立てる。
 
-NOTE: クラス名・import パスは pipecat-ai バージョンによって変わる場合がある。
-  - GeminiLiveLLMService: pipecat.services.google.GeminiLiveLLMService (v1.x)
-  - LiveKitTransport: pipecat.transports.services.livekit.LiveKitTransport
-  - SileroVADAnalyzer: pipecat.audio.vad.silero.SileroVADAnalyzer
+pipecat-ai v1.3.0 で検証済みの import パス (2026-06-06):
+  - GeminiLiveLLMService: pipecat.services.google.gemini_live.llm
+  - LiveKitTransport/LiveKitParams: pipecat.transports.livekit.transport
+  - SileroVADAnalyzer: pipecat.audio.vad.silero
+  - VADParams: pipecat.audio.vad.vad_analyzer
+  - Pipeline: pipecat.pipeline.pipeline
+  - PipelineRunner: pipecat.pipeline.runner (v1.3.0 では deprecated shim、実体は pipecat.workers.runner.WorkerRunner)
+  - PipelineTask/PipelineParams: pipecat.pipeline.task (v1.3.0 では deprecated shim、実体は pipecat.pipeline.worker)
+  - TextFrame/EndFrame: pipecat.frames.frames
 
 参考: https://docs.pipecat.ai/server/services/s2s/gemini-live
 """
