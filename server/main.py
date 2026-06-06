@@ -96,7 +96,7 @@ _active_hub_listener: HubListener | None = None
 # Hub 管理 (bridge-claude worker.py と同じ CommandRouter パターン)
 # ---------------------------------------------------------------------------
 
-async def _run_hub_with_reconnect() -> None:
+async def _run_hub_with_reconnect(otp_store: OTPStore) -> None:
     """単一の AgentHub セッションを管理する。切断時は自動再接続。
 
     CommandRouter に /generate-code を登録し、
@@ -105,6 +105,11 @@ async def _run_hub_with_reconnect() -> None:
     - /generate-code → router が OTP 生成 + 返信 + auto-ack (inbox に届かない)
     - /ping /status /help → router の built-in が処理 (inbox に届かない)
     - 通常メッセージ → inbox iterator から yield → HubListener → pipeline inject
+
+    Args:
+        otp_store: モジュール最上位のシングルトン OTPStore を明示的に受け取る。
+            handle_auth() が参照するインスタンスと同一であることをシグネチャで保証する。
+            (以前は暗黙のモジュールスコープ参照で同一だったが、明示化してリスクを排除)
     """
     global _active_hub
     backoff = 5.0
@@ -128,6 +133,9 @@ async def _run_hub_with_reconnect() -> None:
         POST /auth したとき session_in_use (409) にならないようにする。
         _active_hub_listener を terminate() より先に None にセットし、
         停止中の古いパイプラインに hub メッセージが誤送信されるのを防ぐ。
+
+        otp_store は _run_hub_with_reconnect() の引数として受け取ったシングルトンを
+        クロージャ経由で参照する。handle_auth() と同一インスタンスであることを保証。
         """
         global _active_hub_listener
 
@@ -319,7 +327,7 @@ async def handle_auth(request: web.Request) -> web.Response:
 async def main() -> None:
     # 単一 Hub セッション管理タスク (CommandRouter + inbox dispatch 担当)
     hub_task = asyncio.create_task(
-        _run_hub_with_reconnect(), name="hub_manager"
+        _run_hub_with_reconnect(otp_store), name="hub_manager"
     )
     logger.info("Hub manager started")
 
