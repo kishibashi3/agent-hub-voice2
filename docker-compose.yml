@@ -6,15 +6,10 @@ services:
     image: livekit/livekit-server:latest
     platform: linux/arm64
     restart: unless-stopped
-    ports:
-      - "7880:7880"       # HTTP / WebSocket
-      - "7881:7881/udp"   # WebRTC UDP (RTP/RTCP)
-      - "7882:7882/tcp"   # WebRTC TCP フォールバック
+    network_mode: host
     volumes:
       - ./livekit/livekit.yaml:/livekit.yaml:ro
     command: --config /livekit.yaml
-    networks:
-      - voice-net
 
   # Pipecat voice server (CI でビルド済み ghcr.io イメージを使用)
   pipecat:
