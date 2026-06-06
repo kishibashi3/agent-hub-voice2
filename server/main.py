@@ -21,17 +21,16 @@ voice-gateway v2 — メインサーバー
   SYSTEM_PROMPT        Gemini system instruction (optional)
   PORT                 HTTP listen port (default: 8765)
 
-## hub 接続設計
+## hub 接続設計 (bridge-claude worker.py と同じパターン)
 
 AgentHub.connect() は main() で 1 回だけ呼ぶ。単一の MCP セッションを
-_run_hub_with_reconnect() が管理し、hub.inbox() も 1 本だけ開く。
+_run_hub_with_reconnect() が管理し、hub.inbox(commands=router) で受信する。
 
-メッセージは以下のルールで dispatch する:
-  - /generate-code → CommandListener.handle() (OTP 発行)
-  - それ以外 → HubListener.handle_message() → パイプラインに TextFrame inject
-
-これにより同一 @voice ハンドルで 2 本の MCP セッションが並走する問題と、
-inbox の race condition (メッセージ消失) を解消する。
+CommandRouter に /generate-code を登録する:
+  - router が /generate-code を処理 → OTP 生成 + 返信 + auto-ack
+  - router が /ping /status /help を処理 (built-in)
+  - 通常メッセージ (非コマンド) だけが inbox iterator から yield される
+  - yield されたメッセージ → HubListener.handle_message() → Pipecat pipeline に inject
 """
 import asyncio
 import json
@@ -42,10 +41,9 @@ from pathlib import Path
 
 from aiohttp import web
 
-from agent_hub_sdk import AgentHub
+from agent_hub_sdk import AgentHub, CommandRouter, HubSession, IncomingMessage
 
 from auth import OTPStore
-from command_listener import CommandListener, CMD_GENERATE_CODE, DISPLAY_NAME
 from hub_listener import HubListener
 from hub_tools import HUB_TOOL_DEFINITIONS, HUB_TOOL_HANDLERS, set_hub_session, clear_hub_session
 from pipeline import create_pipeline_and_run
@@ -71,6 +69,8 @@ HUB_PAT = os.environ["AGENT_HUB_GITHUB_PAT"]
 HUB_TENANT = os.environ.get("AGENT_HUB_TENANT")
 PORT = int(os.environ.get("PORT", 8765))
 
+DISPLAY_NAME = "voice-gateway v2 — Gemini Live + LiveKit voice interface"
+
 DEFAULT_SYSTEM_PROMPT = (
     "あなたは agent-hub の音声インターフェース「voice」です。"
     "ユーザーの音声指示に従い、agent-hub 上のメッセージ送受信・参加者確認などを行います。"
@@ -92,22 +92,41 @@ _active_hub = None
 _active_hub_listener: HubListener | None = None
 
 # ---------------------------------------------------------------------------
-# Hub 管理
+# Hub 管理 (bridge-claude worker.py と同じ CommandRouter パターン)
 # ---------------------------------------------------------------------------
 
-async def _run_hub_with_reconnect(cmd_listener: CommandListener) -> None:
+async def _run_hub_with_reconnect() -> None:
     """単一の AgentHub セッションを管理する。切断時は自動再接続。
 
-    hub.inbox() を 1 本だけ開き、メッセージを以下のルールで dispatch する:
-      - /generate-code → CommandListener.handle() (OTP 発行)
-      - それ以外、パイプラインあり → HubListener.handle_message() → TextFrame inject
-      - それ以外、パイプラインなし → ack して無視
+    CommandRouter に /generate-code を登録し、
+    hub.inbox(commands=router) でメッセージを受信する。
 
-    これにより同一 @voice ハンドルで 2 本の MCP セッションが並走する問題と、
-    inbox の race condition を解消する。
+    - /generate-code → router が OTP 生成 + 返信 + auto-ack (inbox に届かない)
+    - /ping /status /help → router の built-in が処理 (inbox に届かない)
+    - 通常メッセージ → inbox iterator から yield → HubListener → pipeline inject
     """
     global _active_hub
     backoff = 5.0
+
+    # CommandRouter: /generate-code を登録。未知コマンドは pipeline に yield する。
+    router = CommandRouter(unknown="yield")
+
+    @router.command("/generate-code", description="OTP コードを生成してセッションを開始する")
+    async def _handle_generate_code(
+        msg: IncomingMessage, hub: HubSession, args: str
+    ) -> None:
+        """OTP を生成して送信者に返信する。router が自動で ack する。"""
+        code, ttl = otp_store.generate()
+        ttl_min = ttl // 60
+        reply = (
+            f"🔑 **{code}** ({ttl_min}分有効)\n\n"
+            "スマホブラウザでこのコードを入力してセッションを開始してください。"
+        )
+        await hub.send(msg.sender, reply)
+        # セキュリティ: コードの先頭 2 桁のみログに残す
+        logger.info("/generate-code: sent to %s (code=%s****)", msg.sender, code[:2])
+        # return None → SDK が ack する (明示的な ack 不要)
+
     while True:
         try:
             async with AgentHub.connect(
@@ -122,23 +141,20 @@ async def _run_hub_with_reconnect(cmd_listener: CommandListener) -> None:
                 backoff = 5.0  # 正常接続できたらリセット
                 logger.info("Hub: @%s に接続しました", HUB_USER)
 
-                async with hub.inbox() as messages:
+                # commands=router: /generate-code などは router が処理し inbox に届かない
+                # 通常メッセージだけが async for msg in messages に届く
+                async with hub.inbox(commands=router) as messages:
                     async for msg in messages:
-                        body = (msg.body or "").strip()
-                        if body.lower() == CMD_GENERATE_CODE:
-                            # /generate-code: セッション有無に関わらず CommandListener が処理
-                            await cmd_listener.handle(hub, msg)
+                        listener = _active_hub_listener
+                        if listener is not None:
+                            # パイプラインがアクティブ: Gemini に inject
+                            await listener.handle_message(hub, msg)
                         else:
-                            listener = _active_hub_listener
-                            if listener is not None:
-                                # パイプラインがアクティブ: pipeline に inject
-                                await listener.handle_message(hub, msg)
-                            else:
-                                # パイプラインなし: ack して無視
-                                try:
-                                    await hub.ack(msg.id)
-                                except Exception:
-                                    pass
+                            # パイプラインなし: ack して無視
+                            try:
+                                await hub.ack(msg.id)
+                            except Exception:
+                                pass
 
         except asyncio.CancelledError:
             logger.info("Hub: シャットダウン")
@@ -277,13 +293,9 @@ async def handle_auth(request: web.Request) -> web.Response:
 # ---------------------------------------------------------------------------
 
 async def main() -> None:
-    # CommandListener (OTP 発行ハンドラ) を生成
-    # hub 接続は _run_hub_with_reconnect が管理するため、ここでは接続しない
-    cmd_listener = CommandListener(otp_store=otp_store)
-
-    # 単一 Hub セッション管理タスク (inbox dispatch も担当)
+    # 単一 Hub セッション管理タスク (CommandRouter + inbox dispatch 担当)
     hub_task = asyncio.create_task(
-        _run_hub_with_reconnect(cmd_listener), name="hub_manager"
+        _run_hub_with_reconnect(), name="hub_manager"
     )
     logger.info("Hub manager started")
 
