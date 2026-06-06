@@ -21,10 +21,9 @@ services:
     image: ghcr.io/kishibashi3/agent-hub-voice2:latest
     platform: linux/arm64
     restart: unless-stopped
-    ports:
-      - "8766:8765"
+    network_mode: host
     environment:
-      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_URL=ws://localhost:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -37,8 +36,6 @@ services:
       - PORT=8765
     depends_on:
       - livekit
-    networks:
-      - voice-net
 
 networks:
   voice-net:
