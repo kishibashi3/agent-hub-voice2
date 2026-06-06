@@ -189,7 +189,7 @@
 <script>
 'use strict';
 
-const { Room, RoomEvent, Track, RemoteAudioTrack, LocalParticipant } = LivekitClient;
+const { Room, RoomEvent, Track, RemoteAudioTrack, LocalParticipant, createLocalAudioTrack } = LivekitClient;
 
 const otpInput      = document.getElementById('otpInput');
 const connectBtn    = document.getElementById('connectBtn');
@@ -271,22 +271,37 @@ async function startSession(code) {
     return;
   }
 
-  // LiveKit Room 接続
-  room = new Room({
-    // WebRTC AEC3 は livekitClient / ブラウザが自動で有効化する
-    audioCaptureDefaults: {
+  // PeerConnection 確立前にマイクを先取得する。
+  // Chrome は setMicrophoneEnabled を RoomEvent.Connected 後 (= PeerConnection 確立後) に
+  // 呼び出すと getUserMedia がレースになり track を kill することがある。
+  // createLocalAudioTrack で先に MediaStreamTrack を確保し、
+  // Connected ハンドラで publishTrack することでこれを回避する。
+  setStatus('マイクを確認中...');
+  let localAudioTrack;
+  try {
+    localAudioTrack = await createLocalAudioTrack({
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
-    },
-  });
+    });
+  } catch (e) {
+    showErrorBanner('マイクエラー', 'マイクの取得に失敗しました: ' + e.message);
+    _submitting = false;
+    connectBtn.disabled = false;
+    setStatus('');
+    return;
+  }
+
+  // LiveKit Room 接続
+  room = new Room();
 
   room.on(RoomEvent.Connected, () => {
     authPanel.style.display = 'none';
     voicePanel.style.display = 'block';
     setStatus('🎙 話しかけてください', true);
-    // マイクを公開
-    room.localParticipant.setMicrophoneEnabled(true).catch(console.error);
+    // 先取得した track を publish。
+    // PeerConnection 確立後に getUserMedia を呼ばないため Chrome による track kill を回避できる。
+    room.localParticipant.publishTrack(localAudioTrack).catch(console.error);
   });
 
   room.on(RoomEvent.Disconnected, () => {
@@ -297,6 +312,8 @@ async function startSession(code) {
     _submitting = false; // セッション終了: フラグをリセットして次の接続を許可
     connectBtn.disabled = false;
     otpInput.value = '';
+    // 先取得 track のクリーンアップ (publishTrack 前に切断した場合も含む)
+    if (localAudioTrack) { localAudioTrack.stop(); localAudioTrack = null; }
     room = null;
   });
 
@@ -335,6 +352,8 @@ async function startSession(code) {
     _submitting = false; // LiveKit 接続失敗時: フラグをリセットして再試行を許可
     connectBtn.disabled = false;
     setStatus('');
+    // 先取得 track のクリーンアップ
+    if (localAudioTrack) { localAudioTrack.stop(); localAudioTrack = null; }
     room = null;
   }
 }
